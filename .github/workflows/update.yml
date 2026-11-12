@@ -1,0 +1,61 @@
+name: Update and publish
+on:
+  schedule:
+    - cron: '*/15 3-23 * * *'   # κάθε 15 λεπτά (UTC), καλύπτει και τα μεσάνυχτα Ελλάδας
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: goalpredict
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch data and build site
+        env:
+          # ΜΥΣΤΙΚΑ (Settings → Secrets and variables → Actions → Secrets). Δεν εμφανίζονται ποτέ στο site ή στο repo.
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          API_BASKETBALL_KEY: ${{ secrets.API_BASKETBALL_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # ΔΗΜΟΣΙΕΣ ΡΥΘΜΙΣΕΙΣ (Variables). Το anon key είναι δημόσιο εξ ορισμού: η προστασία γίνεται από τους κανόνες της βάσης.
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          PREMIUM_MIN_PCT: ${{ vars.PREMIUM_MIN_PCT || '68' }}
+          AI_MODEL: ${{ vars.AI_MODEL || 'claude-haiku-5-5' }}
+          API_DELAY_MS: ${{ vars.API_DELAY_MS || '6500' }}
+          MAX_ANALYSES_PER_DAY: ${{ vars.MAX_ANALYSES_PER_DAY || '6' }}
+          MAX_BB_ANALYSES_PER_DAY: ${{ vars.MAX_BB_ANALYSES_PER_DAY || '4' }}
+          DAYS_AHEAD: ${{ vars.DAYS_AHEAD || '1' }}
+          ENRICH_TOMORROW: ${{ vars.ENRICH_TOMORROW || 'false' }}
+          ENABLE_CORNERS: ${{ vars.ENABLE_CORNERS || 'false' }}
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+          if [ "$REPO" = "${GITHUB_REPOSITORY_OWNER}.github.io" ]; then BASE=""; else BASE="/$REPO"; fi
+          export BASE SITE_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io$BASE"
+          node build.js
+      - name: Save data to the repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if ! git diff --cached --quiet; then git commit -m "Update data"; git pull --rebase; git push; fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
